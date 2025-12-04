@@ -4,6 +4,8 @@ import datetime
 import hashlib
 import os
 import logging
+from prometheus_client import Counter, Histogram, Gauge, generate_latest, CONTENT_TYPE_LATEST
+import time
 
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -87,6 +89,28 @@ def auth_health():
         'status': 'healthy',
         'host': os.getenv('HOSTNAME', 'unknown')
     })
+
+# Prometheus metrics
+REQUEST_COUNT = Counter('auth_requests_total', 'Total auth requests', ['method', 'endpoint', 'status'])
+REQUEST_LATENCY = Histogram('auth_request_duration_seconds', 'Auth request latency')
+LOGIN_ATTEMPTS = Counter('auth_login_attempts_total', 'Total login attempts', ['status'])
+ACTIVE_SESSIONS = Gauge('auth_active_sessions', 'Number of active sessions')
+
+@app.before_request
+def before_request():
+    request.start_time = time.time()
+
+@app.after_request
+def after_request(response):
+    if hasattr(request, 'start_time'):
+        latency = time.time() - request.start_time
+        REQUEST_LATENCY.observe(latency)
+        REQUEST_COUNT.labels(method=request.method, endpoint=request.path, status=response.status_code).inc()
+    return response
+
+@app.route('/metrics', methods=['GET'])
+def metrics():
+    return generate_latest(), 200, {'Content-Type': CONTENT_TYPE_LATEST}
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5002)

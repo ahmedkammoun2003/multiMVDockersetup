@@ -61,13 +61,25 @@ services:
       - microservices-net
 
   grafana:
-    image: grafana/grafana
+    image: grafana/grafana:latest
     ports:
       - "3000:3000"
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+    volumes:
+      - grafana-storage:/var/lib/grafana
+      - ./grafana-provisioning:/etc/grafana/provisioning
     networks:
       - microservices-net
+    depends_on:
+      - prometheus
+
+volumes:
+  grafana-storage:
 
 networks:
   microservices-net:
@@ -141,23 +153,105 @@ EOF
 cat > prometheus.yml << 'EOF'
 global:
   scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'microservices-cluster'
+    environment: 'production'
 
 scrape_configs:
+  - job_name: 'auth-service'
+    static_configs:
+      - targets: ['auth-service:5002']
+    metrics_path: /metrics
+    scrape_interval: 10s
+
   - job_name: 'account-service'
     static_configs:
       - targets: ['192.168.56.11:5000']
-    metrics_path: /health
+    metrics_path: /metrics
+    scrape_interval: 10s
 
   - job_name: 'transaction-service'
     static_configs:
       - targets: ['192.168.56.12:5001']
-    metrics_path: /health
+    metrics_path: /metrics
+    scrape_interval: 10s
 
-  - job_name: 'auth-service'
+  - job_name: 'prometheus'
     static_configs:
-      - targets: ['auth-service:5002']
-    metrics_path: /health
+      - targets: ['localhost:9090']
+    metrics_path: /metrics
+
+  - job_name: 'nginx-gateway'
+    static_configs:
+      - targets: ['nginx-gateway:8080']
+    metrics_path: /metrics
+    scrape_interval: 15s
+
+  - job_name: 'node-exporter-bastion'
+    static_configs:
+      - targets: ['192.168.56.10:9100']
+    scrape_interval: 30s
+
+  - job_name: 'node-exporter-app1'
+    static_configs:
+      - targets: ['192.168.56.11:9100']
+    scrape_interval: 30s
+
+  - job_name: 'node-exporter-app2'
+    static_configs:
+      - targets: ['192.168.56.12:9100']
+    scrape_interval: 30s
+
+  - job_name: 'node-exporter-db'
+    static_configs:
+      - targets: ['192.168.56.20:9100']
+    scrape_interval: 30s
+
+  - job_name: 'postgres-exporter'
+    static_configs:
+      - targets: ['192.168.56.20:9187']
+    scrape_interval: 30s
 EOF
+
+# Create Grafana provisioning directories
+mkdir -p grafana-provisioning/datasources
+mkdir -p grafana-provisioning/dashboards
+
+# Create Grafana datasource configuration
+cat > grafana-provisioning/datasources/prometheus.yml << 'EOF'
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      timeInterval: "5s"
+EOF
+
+# Create Grafana dashboard provider configuration
+cat > grafana-provisioning/dashboards/dashboard.yml << 'EOF'
+apiVersion: 1
+
+providers:
+  - name: 'Microservices Dashboards'
+    orgId: 1
+    folder: ''
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 10
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards
+EOF
+
+# Copy dashboard JSON
+cp /home/vagrant/scripts/grafana-dashboard.json grafana-provisioning/dashboards/ 2>/dev/null || echo "Dashboard file will be added later"
+
 
 # Build and start services
 docker-compose up -d --build

@@ -14,6 +14,7 @@ Vagrant.configure("2") do |config|
     end
     bastion.vm.provision "file", source: "./services", destination: "/home/vagrant/services"
     bastion.vm.provision "file", source: "./scripts/run_api_test.sh", destination: "/home/vagrant/scripts/run_api_test.sh"
+    bastion.vm.provision "file", source: "./scripts/grafana-dashboard.json", destination: "/home/vagrant/scripts/grafana-dashboard.json"
     bastion.vm.provision "shell", path: "./scripts/provision-bastion.sh"
   end
 
